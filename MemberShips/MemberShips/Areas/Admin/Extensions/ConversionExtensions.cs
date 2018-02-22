@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Data.Entity;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Transactions;
 using System.Web;
 
 namespace MemberShips.Areas.Admin.Extensions
@@ -135,7 +136,7 @@ namespace MemberShips.Areas.Admin.Extensions
                     ProductId = productItem.ProductId
                 };
 
-                using (var transaction = new TransactionScope(
+                using (var transaction = new System.Transactions.TransactionScope(
                     TransactionScopeAsyncFlowOption.Enabled))
                 {
                     try
@@ -225,7 +226,7 @@ namespace MemberShips.Areas.Admin.Extensions
                     ProductId = subscriptionProduct.ProductId
                 };
 
-                using (var transaction = new TransactionScope(
+                using (var transaction = new System.Transactions.TransactionScope(
                     TransactionScopeAsyncFlowOption.Enabled))
                 {
                     try

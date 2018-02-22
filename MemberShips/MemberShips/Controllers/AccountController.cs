@@ -9,6 +9,11 @@ using Microsoft.AspNet.Identity;
 using Microsoft.AspNet.Identity.Owin;
 using Microsoft.Owin.Security;
 using MemberShips.Models;
+using System.Net;
+using MemberShips.Entites;
+using System.Collections.Generic;
+using MemberShips.Extensions;
+using System.Data.Entity;
 
 namespace MemberShips.Controllers
 {
@@ -22,7 +27,7 @@ namespace MemberShips.Controllers
         {
         }
 
-        public AccountController(ApplicationUserManager userManager, ApplicationSignInManager signInManager )
+        public AccountController(ApplicationUserManager userManager, ApplicationSignInManager signInManager)
         {
             UserManager = userManager;
             SignInManager = signInManager;
@@ -34,9 +39,9 @@ namespace MemberShips.Controllers
             {
                 return _signInManager ?? HttpContext.GetOwinContext().Get<ApplicationSignInManager>();
             }
-            private set 
-            { 
-                _signInManager = value; 
+            private set
+            {
+                _signInManager = value;
             }
         }
 
@@ -73,8 +78,8 @@ namespace MemberShips.Controllers
                 return View(model);
             }
 
-            // これは、アカウント ロックアウトの基準となるログイン失敗回数を数えません。
-            // パスワード入力失敗回数に基づいてアカウントがロックアウトされるように設定するには、shouldLockout: true に変更してください。
+            // This doesn't count login failures towards account lockout
+            // To enable password failures to trigger account lockout, change to shouldLockout: true
             var result = await SignInManager.PasswordSignInAsync(model.Email, model.Password, model.RememberMe, shouldLockout: false);
             switch (result)
             {
@@ -86,7 +91,7 @@ namespace MemberShips.Controllers
                     return RedirectToAction("SendCode", new { ReturnUrl = returnUrl, RememberMe = model.RememberMe });
                 case SignInStatus.Failure:
                 default:
-                    ModelState.AddModelError("", "無効なログイン試行です。");
+                    ModelState.AddModelError("", "Invalid login attempt.");
                     return View(model);
             }
         }
@@ -96,7 +101,7 @@ namespace MemberShips.Controllers
         [AllowAnonymous]
         public async Task<ActionResult> VerifyCode(string provider, string returnUrl, bool rememberMe)
         {
-            // ユーザーがユーザー名/パスワードまたは外部ログイン経由でログイン済みであることが必要です。
+            // Require that the user has already logged in via username/password or external login
             if (!await SignInManager.HasBeenVerifiedAsync())
             {
                 return View("Error");
@@ -116,11 +121,11 @@ namespace MemberShips.Controllers
                 return View(model);
             }
 
-            // 次のコードは、2 要素コードに対するブルート フォース攻撃を防ぎます。
-            // ユーザーが誤ったコードを入力した回数が指定の回数に達すると、ユーザー アカウントは
-            // 指定の時間が経過するまでロックアウトされます。
-            // アカウント ロックアウトの設定は IdentityConfig の中で構成できます。
-            var result = await SignInManager.TwoFactorSignInAsync(model.Provider, model.Code, isPersistent:  model.RememberMe, rememberBrowser: model.RememberBrowser);
+            // The following code protects for brute force attacks against the two factor codes. 
+            // If a user enters incorrect codes for a specified amount of time then the user account 
+            // will be locked out for a specified amount of time. 
+            // You can configure the account lockout settings in IdentityConfig
+            var result = await SignInManager.TwoFactorSignInAsync(model.Provider, model.Code, isPersistent: model.RememberMe, rememberBrowser: model.RememberBrowser);
             switch (result)
             {
                 case SignInStatus.Success:
@@ -129,7 +134,7 @@ namespace MemberShips.Controllers
                     return View("Lockout");
                 case SignInStatus.Failure:
                 default:
-                    ModelState.AddModelError("", "無効なコード。");
+                    ModelState.AddModelError("", "Invalid code.");
                     return View(model);
             }
         }
@@ -151,24 +156,32 @@ namespace MemberShips.Controllers
         {
             if (ModelState.IsValid)
             {
-                var user = new ApplicationUser { UserName = model.Email, Email = model.Email };
+                var user = new ApplicationUser
+                {
+                    UserName = model.Email,
+                    Email = model.Email,
+                    FirstName = model.FirstName,
+                    IsActive = true,
+                    Registered = DateTime.Now,
+                    EmailConfirmed = true
+                };
                 var result = await UserManager.CreateAsync(user, model.Password);
                 if (result.Succeeded)
                 {
-                    await SignInManager.SignInAsync(user, isPersistent:false, rememberBrowser:false);
-                    
-                    // アカウント確認とパスワード リセットを有効にする方法の詳細については、https://go.microsoft.com/fwlink/?LinkID=320771 を参照してください
-                    // このリンクを含む電子メールを送信します
+                    await SignInManager.SignInAsync(user, isPersistent: false, rememberBrowser: false);
+
+                    // For more information on how to enable account confirmation and password reset please visit http://go.microsoft.com/fwlink/?LinkID=320771
+                    // Send an email with this link
                     // string code = await UserManager.GenerateEmailConfirmationTokenAsync(user.Id);
                     // var callbackUrl = Url.Action("ConfirmEmail", "Account", new { userId = user.Id, code = code }, protocol: Request.Url.Scheme);
-                    // await UserManager.SendEmailAsync(user.Id, "アカウントの確認", "このリンクをクリックすることによってアカウントを確認してください <a href=\"" + callbackUrl + "\">こちら</a>");
+                    // await UserManager.SendEmailAsync(user.Id, "Confirm your account", "Please confirm your account by clicking <a href=\"" + callbackUrl + "\">here</a>");
 
                     return RedirectToAction("Index", "Home");
                 }
                 AddErrors(result);
             }
 
-            // ここで問題が発生した場合はフォームを再表示します
+            // If we got this far, something failed, redisplay form
             return View(model);
         }
 
@@ -205,19 +218,19 @@ namespace MemberShips.Controllers
                 var user = await UserManager.FindByNameAsync(model.Email);
                 if (user == null || !(await UserManager.IsEmailConfirmedAsync(user.Id)))
                 {
-                    // ユーザーが存在しないことや未確認であることを公開しません。
+                    // Don't reveal that the user does not exist or is not confirmed
                     return View("ForgotPasswordConfirmation");
                 }
 
-                // アカウント確認とパスワード リセットを有効にする方法の詳細については、https://go.microsoft.com/fwlink/?LinkID=320771 を参照してください
-                // このリンクを含む電子メールを送信します
-                // string code = await UserManager.GeneratePasswordResetTokenAsync(user.Id);
-                // var callbackUrl = Url.Action("ResetPassword", "Account", new { userId = user.Id, code = code }, protocol: Request.Url.Scheme);		
-                // await UserManager.SendEmailAsync(user.Id, "パスワード", "のリセット <a href=\"" + callbackUrl + "\">こちら</a> をクリックして、パスワードをリセットしてください");
-                // return RedirectToAction("ForgotPasswordConfirmation", "Account");
+                // For more information on how to enable account confirmation and password reset please visit http://go.microsoft.com/fwlink/?LinkID=320771
+                // Send an email with this link
+                string code = await UserManager.GeneratePasswordResetTokenAsync(user.Id);
+                var callbackUrl = Url.Action("ResetPassword", "Account", new { userId = user.Id, code = code }, protocol: Request.Url.Scheme);
+                await UserManager.SendEmailAsync(user.Id, "Reset Password", "Please reset your password by clicking <a href=\"" + callbackUrl + "\">here</a>");
+                return RedirectToAction("ForgotPasswordConfirmation", "Account");
             }
 
-            // ここで問題が発生した場合はフォームを再表示します
+            // If we got this far, something failed, redisplay form
             return View(model);
         }
 
@@ -251,7 +264,7 @@ namespace MemberShips.Controllers
             var user = await UserManager.FindByNameAsync(model.Email);
             if (user == null)
             {
-                // ユーザーが存在しないことを公開しません。
+                // Don't reveal that the user does not exist
                 return RedirectToAction("ResetPasswordConfirmation", "Account");
             }
             var result = await UserManager.ResetPasswordAsync(user.Id, model.Code, model.Password);
@@ -278,7 +291,7 @@ namespace MemberShips.Controllers
         [ValidateAntiForgeryToken]
         public ActionResult ExternalLogin(string provider, string returnUrl)
         {
-            // 外部ログイン プロバイダーへのリダイレクトを要求します
+            // Request a redirect to the external login provider
             return new ChallengeResult(provider, Url.Action("ExternalLoginCallback", "Account", new { ReturnUrl = returnUrl }));
         }
 
@@ -309,7 +322,7 @@ namespace MemberShips.Controllers
                 return View();
             }
 
-            // トークンを生成して送信します。
+            // Generate the token and send it
             if (!await SignInManager.SendTwoFactorCodeAsync(model.SelectedProvider))
             {
                 return View("Error");
@@ -328,7 +341,7 @@ namespace MemberShips.Controllers
                 return RedirectToAction("Login");
             }
 
-            // ユーザーが既にログインを持っている場合、この外部ログイン プロバイダーを使用してユーザーをサインインします
+            // Sign in the user with this external login provider if the user already has a login
             var result = await SignInManager.ExternalSignInAsync(loginInfo, isPersistent: false);
             switch (result)
             {
@@ -340,7 +353,7 @@ namespace MemberShips.Controllers
                     return RedirectToAction("SendCode", new { ReturnUrl = returnUrl, RememberMe = false });
                 case SignInStatus.Failure:
                 default:
-                    // ユーザーがアカウントを持っていない場合、ユーザーにアカウントを作成するよう求めます
+                    // If the user does not have an account, then prompt the user to create an account
                     ViewBag.ReturnUrl = returnUrl;
                     ViewBag.LoginProvider = loginInfo.Login.LoginProvider;
                     return View("ExternalLoginConfirmation", new ExternalLoginConfirmationViewModel { Email = loginInfo.Email });
@@ -361,7 +374,7 @@ namespace MemberShips.Controllers
 
             if (ModelState.IsValid)
             {
-                // 外部ログイン プロバイダーからユーザーに関する情報を取得します
+                // Get the information about the user from the external login provider
                 var info = await AuthenticationManager.GetExternalLoginInfoAsync();
                 if (info == null)
                 {
@@ -403,6 +416,342 @@ namespace MemberShips.Controllers
             return View();
         }
 
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> Index()
+        {
+            var users = new List<UserViewModel>();
+            await users.GetUsers();
+
+            return View(users);
+        }
+
+        [Authorize(Roles = "Admin")]
+        public ActionResult Create()
+        {
+            return View();
+        }
+
+        [HttpPost]
+        [Authorize(Roles = "Admin")]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> Create(UserViewModel model)
+        {
+            try
+            {
+                if (model == null)
+                {
+                    return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+                }
+
+
+                if (ModelState.IsValid)
+                {
+                    var user = new ApplicationUser
+                    {
+                        UserName = model.Email,
+                        Email = model.Email,
+                        FirstName = model.FirstName,
+                        IsActive = true,
+                        Registered = DateTime.Now,
+                        EmailConfirmed = true
+                    };
+                    var result = await UserManager.CreateAsync(user, model.Password);
+                    if (result.Succeeded)
+                    {
+                        return RedirectToAction("Index", "Account");
+                    }
+                    AddErrors(result);
+                }
+            }
+            catch { }
+
+            // If we got this far something failed, re-display the form
+            return View(model);
+        }
+
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> Edit(string userId)
+        {
+            if (userId == null || userId.Equals(string.Empty))
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+            ApplicationUser user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return HttpNotFound();
+            }
+            var model = new UserViewModel
+            {
+                Email = user.Email,
+                FirstName = user.FirstName,
+                Id = user.Id,
+                Password = user.PasswordHash
+            };
+            return View(model);
+        }
+
+        [HttpPost]
+        [Authorize(Roles = "Admin")]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> Edit(UserViewModel model)
+        {
+            try
+            {
+                if (model == null)
+                {
+                    return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+                }
+
+                if (ModelState.IsValid)
+                {
+                    var user = await UserManager.FindByIdAsync(model.Id);
+                    if (user != null)
+                    {
+                        user.Email = model.Email;
+                        user.UserName = model.Email;
+                        user.FirstName = model.FirstName;
+                        if (!user.PasswordHash.Equals(model.Password))
+                            user.PasswordHash = UserManager.PasswordHasher
+                                .HashPassword(model.Password);
+
+                        var result = await UserManager.UpdateAsync(user);
+                        if (result.Succeeded)
+                        {
+                            return RedirectToAction("Index", "Account");
+                        }
+                        AddErrors(result);
+                    }
+                }
+            }
+            catch { }
+            return View(model);
+        }
+
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> Delete(string userId)
+        {
+            if (userId == null || userId.Equals(string.Empty))
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+            ApplicationUser user = await UserManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return HttpNotFound();
+            }
+            var model = new UserViewModel
+            {
+                Email = user.Email,
+                FirstName = user.FirstName,
+                Id = user.Id,
+                Password = "Fake Password"
+            };
+            return View(model);
+        }
+
+        [HttpPost]
+        [Authorize(Roles = "Admin")]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> Delete(UserViewModel model)
+        {
+            try
+            {
+                if (model == null)
+                {
+                    return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+                }
+
+                if (ModelState.IsValid)
+                {
+                    var user = await UserManager.FindByIdAsync(model.Id);
+                    var result = await UserManager.DeleteAsync(user);
+                    if (result.Succeeded)
+                    {
+                        var db = new ApplicationDbContext();
+                        var subscriptions = db.UserSubscriptions.Where(
+                            u => u.UserId.Equals(user.Id));
+                        db.UserSubscriptions.RemoveRange(subscriptions);
+                        await db.SaveChangesAsync();
+
+                        return RedirectToAction("Index", "Account");
+                    }
+                    AddErrors(result);
+
+                }
+            }
+            catch { }
+            return View(model);
+        }
+
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> Subscriptions(string userId)
+        {
+            if (userId == null || userId.Equals(string.Empty))
+            {
+                return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+            }
+            var model = new UserSubscriptionViewModel();
+            var db = new ApplicationDbContext();
+            model.UserSubscriptions = await
+                (from us in db.UserSubscriptions
+                 join s in db.Subscriptions on us.SubscriptionId equals s.Id
+                 where us.UserId.Equals(userId)
+                 select new UserSubscriptionModel
+                 {
+                     Id = us.SubscriptionId,
+                     StartDate = us.StartDate,
+                     EndDate = us.EndDate,
+                     Description = s.Description,
+                     RegistrationCode = s.RegistrationCode,
+                     Title = s.Title
+                 }).ToListAsync();
+
+            var ids = model.UserSubscriptions.Select(us => us.Id);
+
+            model.Subscriptions = await db.Subscriptions.Where(
+                s => !ids.Contains(s.Id)).ToListAsync();
+
+            model.DisableDropDown = model.Subscriptions.Count.Equals(0);
+            model.UserId = userId;
+            return View(model);
+        }
+        [HttpPost]
+        [Authorize(Roles = "Admin")]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> Subscriptions(
+            UserSubscriptionViewModel model)
+        {
+            try
+            {
+                if (model == null)
+                {
+                    return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+                }
+
+                if (ModelState.IsValid)
+                {
+                    var db = new ApplicationDbContext();
+                    db.UserSubscriptions.Add(new UserSubscription
+                    {
+                        UserId = model.UserId,
+                        SubscriptionId = model.SubscriptionId,
+                        StartDate = DateTime.Now,
+                        EndDate = DateTime.MaxValue
+                    });
+
+                    await db.SaveChangesAsync();
+                }
+            }
+            catch { }
+            return RedirectToAction("Subscriptions", "Account", new { userId = model.UserId });
+        }
+
+        [Authorize(Roles = "Admin")]
+        public async Task<ActionResult> RemoveUserSubscription(
+        string userId, int subscriptionId)
+        {
+            try
+            {
+                if (userId == null || userId.Length.Equals(0) ||
+                    subscriptionId <= 0)
+                {
+                    return new HttpStatusCodeResult(HttpStatusCode.BadRequest);
+                }
+
+                if (ModelState.IsValid)
+                {
+                    var db = new ApplicationDbContext();
+                    var subscriptions = db.UserSubscriptions.Where(
+                        us => us.UserId.Equals(userId) &&
+                        us.SubscriptionId.Equals(subscriptionId));
+
+                    db.UserSubscriptions.RemoveRange(subscriptions);
+                    await db.SaveChangesAsync();
+                }
+            }
+            catch { }
+            return RedirectToAction("Subscriptions", "Account", new { userId = userId });
+        }
+
+        //#region Register User
+        //[HttpPost]
+        //[AllowAnonymous]
+        //[ValidateAntiForgeryToken]
+        //public async Task<ActionResult> RegisterUserAsync(RegisterUserModel model)
+        //{
+        //    model.AcceptUserAgreement = true;
+
+        //    if (ModelState.IsValid)
+        //    {
+        //        var user = new ApplicationUser
+        //        {
+        //            UserName = model.Email,
+        //            Email = model.Email,
+        //            FirstName = model.Name,
+        //            IsActive = true,
+        //            Registered = DateTime.Now,
+        //            EmailConfirmed = true
+        //        };
+        //        var result = await UserManager.CreateAsync(user, model.Password);
+        //        if (result.Succeeded)
+        //        {
+        //            await SignInManager.SignInAsync(user, isPersistent: false, rememberBrowser: false);
+
+        //            // For more information on how to enable account confirmation and password reset please visit http://go.microsoft.com/fwlink/?LinkID=320771
+        //            // Send an email with this link
+        //            // string code = await UserManager.GenerateEmailConfirmationTokenAsync(user.Id);
+        //            // var callbackUrl = Url.Action("ConfirmEmail", "Account", new { userId = user.Id, code = code }, protocol: Request.Url.Scheme);
+        //            // await UserManager.SendEmailAsync(user.Id, "Confirm your account", "Please confirm your account by clicking <a href=\"" + callbackUrl + "\">here</a>");
+
+        //            return PartialView("_RegisterUserPartial", model);
+        //        }
+        //        AddUserErrors(result);
+        //    }
+
+        //    // If we got this far, something failed, redisplay form
+        //    return PartialView("_RegisterUserPartial", model);
+        //}
+
+        //private void AddUserErrors(IdentityResult result)
+        //{
+        //    foreach (var error in result.Errors)
+        //    {
+        //        if (error.StartsWith("Name") &&
+        //            error.EndsWith("is already taken."))
+        //            continue;
+
+        //        ModelState.AddModelError("", error);
+        //    }
+        //}
+        //#endregion
+
+        #region Login
+        [HttpPost]
+        [AllowAnonymous]
+        [ValidateAntiForgeryToken]
+        public async Task<ActionResult> LoginAsync(LoginViewModel model, string returnUrl)
+        {
+            if (ModelState.IsValid)
+            {
+                var user = UserManager.Users.FirstOrDefault(
+                    u => u.Email.Equals(model.Email));
+                if (user != null && user.UserName.Length > 0)
+                {
+                    var result = await SignInManager.PasswordSignInAsync(
+                        user.UserName, model.Password, model.RememberMe,
+                        shouldLockout: false);
+
+                    if (result.Equals(SignInStatus.Success))
+                        return PartialView("_LoginPanelPartial", model);
+                }
+            }
+
+            ModelState.AddModelError("", "Invalid login attempt.");
+            return PartialView("_LoginPanelPartial", model);
+        }
+        #endregion
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
@@ -423,8 +772,8 @@ namespace MemberShips.Controllers
             base.Dispose(disposing);
         }
 
-        #region ヘルパー
-        // 外部ログインの追加時に XSRF の防止に使用します
+        #region Helpers
+        // Used for XSRF protection when adding external logins
         private const string XsrfKey = "XsrfId";
 
         private IAuthenticationManager AuthenticationManager

@@ -9,6 +9,8 @@ using System.Web;
 using System.Web.Mvc;
 using MemberShips.Entites;
 using MemberShips.Models;
+using System.Activities.Statements;
+using System.Transactions;
 
 namespace MemberShips.Areas.Admin.Controllers
 {
@@ -113,7 +115,7 @@ namespace MemberShips.Areas.Admin.Controllers
         public async Task<ActionResult> DeleteConfirmed(int id)
         {
             Subscription subscription = await db.Subscriptions.FindAsync(id);
-            using (var transaction = new TransactionScope(
+            using (var transaction = new System.Transactions.TransactionScope(
                     TransactionScopeAsyncFlowOption.Enabled))
             {
                 try

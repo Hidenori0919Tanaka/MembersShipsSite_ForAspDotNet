@@ -12,6 +12,7 @@ using MemberShips.Models;
 using MemberShips.Areas.Admin.Extensions;
 using MemberShips.Areas.Admin.Models;
 using System.Activities.Statements;
+using System.Transactions;
 
 namespace MemberShips.Areas.Admin.Controllers
 {
@@ -129,7 +130,7 @@ namespace MemberShips.Areas.Admin.Controllers
         public async Task<ActionResult> DeleteConfirmed(int id)
         {
             Product product = await db.Products.FindAsync(id);
-            using (var transaction = new TransactionScope(
+            using (var transaction = new System.Transactions.TransactionScope(
                     TransactionScopeAsyncFlowOption.Enabled))
             {
                 try
